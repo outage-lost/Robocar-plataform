@@ -1,0 +1,20 @@
+{
+    "name": "robocar-backend",
+    "version": "1.0.0",
+    "description": "RoboCar Platform Backend Server",
+    "main": "src/server.js",
+    "scripts": {
+        "start": "node src/server.js",
+        "dev": "nodemon src/server.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "dotenv": "^16.0.3",
+        "express": "^4.18.2",
+        "socket.io": "^4.5.4"
+    },
+    "devDependencies": {
+        "nodemon": "^2.0.20",
+        "socket.io-client": "^4.8.3"
+    }
+}

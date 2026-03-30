@@ -1,0 +1,19 @@
+.git
+.DS_Store
+Thumbs.db
+
+# Node / backend
+backend/node_modules/
+backend/npm-debug.log*
+backend/.env
+
+# Logs
+*.log
+
+# Cloudflared local credentials
+cloudflared/
+/backend/cloudflared-credentials.json
+
+# Editor / IDE
+.vscode/
+.idea/
