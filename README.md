@@ -1,117 +1,66 @@
 # RoboCar Platform
 
-Plataforma web para controlar un carro robot con ESP32, panel administrativo en tiempo real y una app de cámara para teléfono. El backend centraliza autenticación, estado, señalización WebRTC y la API de polling que consume el microcontrolador.
+Guía de instalación y ejecución para una plataforma de control remoto de un robot con ESP32, panel web de administración y app web de cámara para teléfono.
 
-El proyecto quedó saneado para publicarlo:
+Repositorio oficial:
 
-- `backend/.env` no se sube
-- `backend/node_modules/` no se sube
-- no quedan dominios privados ni tokens reales en la documentación
-- los archivos de ejemplo usan placeholders
+- GitHub: `https://github.com/outage-lost/Robocar-plataform`
+- Clonar: `git clone https://github.com/outage-lost/Robocar-plataform.git`
 
-## Qué incluye
+## 1. Descripción general
 
-- panel de administración en `/`
-- app de cámara en `/camera`
-- backend Node.js + Express + Socket.IO
-- streaming WebRTC de video y audio entre teléfono y panel
-- intercom desde el panel hacia el teléfono
-- API `GET /api/commands` para polling del ESP32
-- referencia de firmware en `ESP32_REFERENCE.ino`
-- plantilla de Cloudflare Tunnel en `backend/cloudflared-robocar.yml`
+El proyecto está compuesto por tres piezas:
 
-## Arquitectura
+- un backend Node.js + Express + Socket.IO
+- un panel administrativo web en `/`
+- una app de cámara web en `/camera`
 
-### Backend
+El backend se encarga de:
 
-Código principal:
+- servir el frontend
+- autenticar tokens
+- mantener el estado del robot en memoria
+- coordinar la señalización WebRTC
+- exponer la API que consulta el ESP32
 
-- [backend/src/server.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/src/server.js)
-- [backend/src/config.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/src/config.js)
+## 2. Requisitos
 
-Responsabilidades:
+Necesitas:
 
-- servir el panel y la app de cámara
-- autenticar tokens por `X-Robot-Token`, `auth.token` o `?token=...`
-- exponer `GET /api/commands` para el ESP32
-- exponer `GET /api/stun` para clientes autenticados
-- mantener estado global en memoria
-- retransmitir señalización WebRTC entre `/admin` y `/camera`
-- aplicar fail-safe con `STOP` si el panel se desconecta o el ESP32 deja de hacer polling
+- Node.js 20 o superior
+- npm 10 o superior
+- un navegador moderno
+- un teléfono con cámara y micrófono
+- una forma de exponer el proyecto por HTTPS si la cámara se usará desde otro dispositivo
 
-### Frontend admin
+## 3. Requisito crítico: HTTPS o túnel inverso
 
-Archivos:
+La app `/camera` usa `getUserMedia`, así que el navegador solo permitirá permisos de cámara y micrófono en estos casos:
 
-- [frontend/admin/index.html](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/frontend/admin/index.html)
-- [frontend/admin/admin.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/frontend/admin/admin.js)
+- `https://`
+- `http://localhost`
 
-Funciones:
+Eso significa que si abres la cámara desde un teléfono apuntando a una IP local con `http://192.168.x.x:3000`, lo normal es que el navegador bloquee los permisos.
 
-- autenticación con `TOKEN_ADMIN`
-- joystick y control por teclado
-- ajuste de velocidad PWM
-- control de LED
-- control remoto de cámara, flash y micrófono
-- recepción de video y audio desde el teléfono
-- intercom del panel hacia el teléfono
-- log del sistema en tiempo real
+Para que el proyecto funcione correctamente en un flujo real, debes usar una de estas opciones:
 
-### Frontend cámara
+- servir la app por HTTPS
+- montar un túnel inverso o túnel público HTTPS
+- probar la cámara únicamente en `localhost`
 
-Archivos:
+En este repositorio ya queda una plantilla de túnel en [backend/cloudflared-robocar.yml](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/cloudflared-robocar.yml), pero debes reemplazar tus propios valores.
 
-- [frontend/camera/index.html](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/frontend/camera/index.html)
-- [frontend/camera/camera.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/frontend/camera/camera.js)
+## 4. Clonar el repositorio
 
-Funciones:
-
-- autenticación con `TOKEN_CAMERA`
-- vista previa local antes de transmitir
-- captura de video y audio con `getUserMedia`
-- streaming WebRTC hacia el panel
-- reproducción de audio remoto del panel
-- cambio de cámara y control de flash
-- renegociación cuando el panel se reconecta
-
-### ESP32
-
-Referencia:
-
-- [ESP32_REFERENCE.ino](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/ESP32_REFERENCE.ino)
-
-El ESP32 consulta:
-
-```http
-GET /api/commands
-X-Robot-Token: TOKEN_ESP32
+```bash
+git clone https://github.com/outage-lost/Robocar-plataform.git
+cd Robocar-plataform
 ```
 
-Respuesta típica:
-
-```json
-{
-  "command": "forward",
-  "speed": 128,
-  "led": false,
-  "timestamp": 1711111111111
-}
-```
-
-Comandos válidos:
-
-- `stop`
-- `forward`
-- `backward`
-- `left`
-- `right`
-
-El backend marca al ESP32 como offline tras 2000 ms sin polling. La referencia usa 100 ms, que es coherente con esa ventana.
-
-## Estructura del proyecto
+## 5. Estructura del proyecto
 
 ```text
-robocar-platform/
+Robocar-plataform/
 ├── .dockerignore
 ├── .gitignore
 ├── Dockerfile
@@ -137,24 +86,30 @@ robocar-platform/
         └── styles.css
 ```
 
-## Requisitos
+Archivos clave:
 
-- Node.js 20 o superior
-- npm 10 o superior
-- navegador moderno
-- HTTPS o `localhost` para usar cámara y micrófono en `/camera`
+- backend principal: [backend/src/server.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/src/server.js)
+- estado global: [backend/src/config.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/src/config.js)
+- panel admin: [frontend/admin/admin.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/frontend/admin/admin.js)
+- app cámara: [frontend/camera/camera.js](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/frontend/camera/camera.js)
+- referencia ESP32: [ESP32_REFERENCE.ino](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/ESP32_REFERENCE.ino)
 
-## Instalación local
+## 6. Instalación
+
+### 6.1 Instalar dependencias
 
 ```bash
-git clone <TU_REPO_GITHUB>
-cd robocar-platform
 cd backend
 npm ci
+```
+
+### 6.2 Crear el archivo de entorno
+
+```bash
 cp .env.example .env
 ```
 
-Edita `backend/.env`:
+Edita `backend/.env` con tus propios valores:
 
 ```env
 PORT=3000
@@ -165,7 +120,20 @@ TOKEN_ESP32=define_un_token_seguro_para_esp32
 STUN_SERVERS=stun.l.google.com:19302,stun1.l.google.com:19302
 ```
 
-## Ejecución
+Variables:
+
+| Variable | Requerida | Uso |
+|---|---|---|
+| `PORT` | No | Puerto HTTP del backend |
+| `NODE_ENV` | No | Entorno de ejecución |
+| `TOKEN_ADMIN` | Sí | Acceso al panel `/` y namespace `/admin` |
+| `TOKEN_CAMERA` | Sí | Acceso a `/camera` y namespace `/camera` |
+| `TOKEN_ESP32` | Sí | Autenticación para `GET /api/commands` |
+| `STUN_SERVERS` | No | Servidores STUN separados por coma |
+
+No publiques ni despliegues con los tokens por defecto del backend.
+
+## 7. Ejecución local
 
 Desde `backend/`:
 
@@ -173,49 +141,101 @@ Desde `backend/`:
 npm run dev
 ```
 
-O:
+O en modo simple:
 
 ```bash
 npm start
 ```
 
-URLs locales:
+URLs de desarrollo:
 
 - panel: `http://localhost:3000/`
 - cámara: `http://localhost:3000/camera/`
 - API ESP32: `http://localhost:3000/api/commands`
 
-## Uso
+## 8. Ejecución con HTTPS o túnel
 
-### Panel administrativo
+Si vas a abrir la app de cámara desde el teléfono, usa HTTPS. Tienes varias opciones:
 
-1. Abre `http://localhost:3000/`
-2. Ingresa `TOKEN_ADMIN`
-3. Usa los controles de movimiento, velocidad, LED y cámara
+### Opción A: túnel inverso / público HTTPS
 
-También puedes abrirlo con token:
+Puedes usar Cloudflare Tunnel u otra solución equivalente. Este repo incluye una plantilla:
+
+- [backend/cloudflared-robocar.yml](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/cloudflared-robocar.yml)
+
+Debes reemplazar:
+
+- `YOUR_TUNNEL_ID`
+- `robocar.example.com`
+- la ruta local del archivo de credenciales
+
+### Opción B: reverse proxy con HTTPS
+
+También puedes exponer el backend detrás de:
+
+- Nginx con TLS
+- Caddy
+- Traefik
+
+Mientras el teléfono abra la app por `https://`, los permisos de cámara y micrófono funcionarán.
+
+## 9. Flujo de uso
+
+### 9.1 Panel administrativo
+
+1. Abre `http://localhost:3000/` o tu dominio HTTPS.
+2. Ingresa `TOKEN_ADMIN`.
+3. Usa el panel para mover el robot, ajustar velocidad, controlar LED y gestionar cámara/micrófono.
+
+También puedes entrar con token en la URL:
 
 ```text
 http://localhost:3000/?token=TOKEN_ADMIN
 ```
 
-### App de cámara
+### 9.2 App de cámara
 
-1. Abre `http://localhost:3000/camera/` desde el teléfono
-2. Usa HTTPS o `localhost`
-3. Ingresa `TOKEN_CAMERA`
-4. Acepta permisos de cámara y micrófono
-5. Pulsa `Transmitir`
+1. Abre `/camera/` desde el teléfono.
+2. Asegúrate de estar en `https://` o `localhost`.
+3. Ingresa `TOKEN_CAMERA`.
+4. Acepta permisos de cámara y micrófono.
+5. Pulsa `Transmitir`.
 
 También puedes abrirla con token:
 
 ```text
-http://localhost:3000/camera/?token=TOKEN_CAMERA
+https://tu-dominio/camera/?token=TOKEN_CAMERA
 ```
 
-### ESP32
+### 9.3 ESP32
 
-Configura en [ESP32_REFERENCE.ino](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/ESP32_REFERENCE.ino):
+El ESP32 debe consultar periódicamente:
+
+```http
+GET /api/commands
+X-Robot-Token: TOKEN_ESP32
+```
+
+Respuesta esperada:
+
+```json
+{
+  "command": "forward",
+  "speed": 128,
+  "led": false,
+  "timestamp": 1711111111111
+}
+```
+
+Comandos válidos:
+
+- `stop`
+- `forward`
+- `backward`
+- `left`
+- `right`
+
+La referencia del firmware está en [ESP32_REFERENCE.ino](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/ESP32_REFERENCE.ino). Debes configurar:
 
 - `ssid`
 - `password`
@@ -229,28 +249,7 @@ const char* serverURL = "http://192.168.1.50:3000/api/commands";
 const char* robotToken = "TU_TOKEN_ESP32";
 ```
 
-## Variables de entorno
-
-Archivo base: [backend/.env.example](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/.env.example)
-
-| Variable | Requerida | Descripción |
-|---|---|---|
-| `PORT` | No | Puerto HTTP del backend |
-| `NODE_ENV` | No | Entorno de ejecución |
-| `TOKEN_ADMIN` | Sí | Token del panel y namespace `/admin` |
-| `TOKEN_CAMERA` | Sí | Token de la app y namespace `/camera` |
-| `TOKEN_ESP32` | Sí | Token para `GET /api/commands` |
-| `STUN_SERVERS` | No | Lista separada por comas de servidores STUN |
-
-Si no defines tokens, el backend usa defaults inseguros:
-
-- `admin123`
-- `camera123`
-- `esp32123`
-
-No publiques ni despliegues con esos valores.
-
-## API HTTP
+## 10. API disponible
 
 ### `GET /api/commands`
 
@@ -258,8 +257,8 @@ Requiere `TOKEN_ESP32`.
 
 Autenticación aceptada:
 
-- `X-Robot-Token`
-- `?token=...`
+- header `X-Robot-Token`
+- query string `?token=...`
 
 Ejemplo:
 
@@ -271,11 +270,13 @@ curl -H "X-Robot-Token: $TOKEN_ESP32" http://localhost:3000/api/commands
 
 Requiere cualquier token válido del sistema.
 
+Ejemplo:
+
 ```bash
 curl -H "X-Robot-Token: $TOKEN_ADMIN" http://localhost:3000/api/stun
 ```
 
-## Eventos Socket.IO
+## 11. Eventos Socket.IO
 
 ### Namespace `/admin`
 
@@ -319,9 +320,9 @@ Recibe:
 - `webrtc:restart`
 - `stun:servers`
 
-## Docker
+## 12. Docker
 
-Imagen incluida en [Dockerfile](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/Dockerfile).
+El proyecto incluye [Dockerfile](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/Dockerfile).
 
 Build:
 
@@ -340,35 +341,9 @@ docker run --rm -p 3100:3100 \
   robocar-platform
 ```
 
-## Cloudflare Tunnel
+Si vas a usar la cámara desde un teléfono, recuerda que Docker por sí solo no resuelve el requisito de HTTPS. Necesitas además un túnel o un proxy TLS.
 
-La plantilla está en [backend/cloudflared-robocar.yml](/home/joel/Escritorio/another-joel/work-in-b06labs/Projects/MicrocontrollerProjects/robocar-platform/backend/cloudflared-robocar.yml). Debes reemplazar:
-
-- `YOUR_TUNNEL_ID`
-- `/home/USER/.cloudflared/...`
-- `robocar.example.com`
-
-## Publicación en GitHub
-
-Flujo sugerido:
-
-```bash
-git init
-git add .
-git status
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin <TU_URL_GITHUB>
-git push -u origin main
-```
-
-Antes de hacer `git add .`, verifica:
-
-- `backend/.env` contiene tus secretos locales y no debe subirse
-- `backend/node_modules/` no debe subirse
-- si generaste otros archivos de credenciales, agrégalos al `.gitignore`
-
-## Prueba rápida
+## 13. Prueba rápida
 
 Con el backend corriendo, desde `backend/`:
 
@@ -376,20 +351,32 @@ Con el backend corriendo, desde `backend/`:
 node test-socket.js
 ```
 
-También puedes sobrescribir host, puerto y tokens:
+También puedes pasar host, puerto y tokens:
 
 ```bash
 TEST_HOST=http://localhost:3100 PORT=3100 TOKEN_ADMIN=... TOKEN_CAMERA=... node test-socket.js
 ```
 
-## Limitaciones actuales
+## 14. Consideraciones de publicación
 
-- el estado es efímero y se pierde al reiniciar
+Este repo ya está preparado para subirse sin incluir:
+
+- `backend/.env`
+- `backend/node_modules/`
+
+Antes de trabajar en producción:
+
+- usa tokens propios
+- usa HTTPS real o un túnel inverso
+- ajusta el firmware ESP32 a tus pines reales
+
+## 15. Limitaciones actuales
+
+- el estado es efímero y se pierde al reiniciar el backend
 - no hay base de datos
 - no hay suite formal de tests en `package.json`
-- el firmware ESP32 es una referencia y puede requerir ajuste de pines o librerías
-- fuera de `localhost`, la app de cámara necesita HTTPS
+- el firmware ESP32 es una referencia y puede requerir ajustes
 
-## Licencia
+## 16. Licencia
 
-Si vas a publicar el repositorio, añade una licencia antes del push si quieres dejar claras las condiciones de uso.
+Si vas a distribuir públicamente el proyecto, añade una licencia explícita al repositorio.
