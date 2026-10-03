@@ -1,263 +1,110 @@
 /**
- * RoboCar ESP32 Controller Reference Code
- * Polling API every 100ms for robot commands
- * 
- * This is a reference implementation for the ESP32 microcontroller
- * to integrate with the RoboCar platform.
+ * RoboCar - ESP32 Bluetooth controller
+ * Protocol: D:<throttle>:<steering>:<speed>, L:0/L:1 and S, each ending in \n.
+ * throttle/steering are -100..100 and speed is 0..255.
  */
+#include <Arduino.h>
+#include "BluetoothSerial.h"
+#include "esp_arduino_version.h"
 
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
+// Pin definitions — kept from the previous project revision.
+const int PIN_MOTOR_A = 12;
+const int PIN_MOTOR_B = 13;
+const int PIN_MOTOR_C = 14;
+const int PIN_MOTOR_D = 15;
+const int PIN_LED = 23;
+const int PIN_PWM = 25;
 
-// ==================== CONFIGURATION ====================
-
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-const char* serverURL = "http://YOUR_SERVER_IP:3000/api/commands";
-const char* robotToken = "YOUR_ESP32_TOKEN";
-const int pollInterval = 100; // milliseconds
-
-// Pin definitions
-const int PIN_MOTOR_A = 12;  // Motor A forward
-const int PIN_MOTOR_B = 13;  // Motor A backward
-const int PIN_MOTOR_C = 14;  // Motor B forward
-const int PIN_MOTOR_D = 15;  // Motor B backward
-const int PIN_LED = 23;       // LED (D13 equivalent)
-const int PIN_PWM = 25;       // PWM for speed control
-
-// PWM settings
 const int PWM_FREQUENCY = 5000;
-const int PWM_RESOLUTION = 8; // 8-bit (0-255)
+const int PWM_RESOLUTION = 8;
 const int PWM_CHANNEL = 0;
+const unsigned long COMMAND_TIMEOUT_MS = 500;
 
-// ==================== GLOBAL STATE ====================
+BluetoothSerial SerialBT;
+String inputLine;
+unsigned long lastCommandAt = 0;
+int throttle = 0;
+int steering = 0;
+int maxSpeed = 180;
+bool ledOn = false;
 
-struct RobotState {
-  String command;
-  int speed;
-  bool led;
-  unsigned long lastUpdate;
-};
-
-RobotState robotState = {
-  "stop",
-  128,
-  false,
-  0
-};
-
-unsigned long lastPollTime = 0;
-
-// ==================== SETUP ====================
-
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-
-  Serial.println("\n\n=== RoboCar ESP32 Initializing ===");
-
-  // Setup pins
-  pinMode(PIN_MOTOR_A, OUTPUT);
-  pinMode(PIN_MOTOR_B, OUTPUT);
-  pinMode(PIN_MOTOR_C, OUTPUT);
-  pinMode(PIN_MOTOR_D, OUTPUT);
-  pinMode(PIN_LED, OUTPUT);
-
-  // Setup PWM
-  ledcSetup(PWM_CHANNEL, PWM_FREQUENCY, PWM_RESOLUTION);
-  ledcAttachPin(PIN_PWM, PWM_CHANNEL);
-
-  // Initial state
-  stopMotors();
-  digitalWrite(PIN_LED, LOW);
-
-  // Connect to WiFi
-  connectToWiFi();
-
-  Serial.println("Setup complete!");
-}
-
-// ==================== MAIN LOOP ====================
-
-void loop() {
-  if (WiFi.connected()) {
-    // Poll server for commands every 100ms
-    if (millis() - lastPollTime >= pollInterval) {
-      pollCommandsFromServer();
-      lastPollTime = millis();
-    }
-
-    // Apply current commands
-    executeCommand();
-  } else {
-    // Reconnect if disconnected
-    if (millis() % 5000 == 0) {
-      Serial.println("WiFi disconnected. Reconnecting...");
-      connectToWiFi();
-    }
-    stopMotors();
-  }
-
-  delay(10);
-}
-
-// ==================== WIFI CONNECTION ====================
-
-void connectToWiFi() {
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
-
-  WiFi.begin(ssid, password);
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected!");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\nFailed to connect to WiFi");
-  }
-}
-
-// ==================== API POLLING ====================
-
-void pollCommandsFromServer() {
-  HTTPClient http;
-
-  Serial.print("[POLL] Requesting: ");
-  Serial.println(serverURL);
-
-  http.begin(serverURL);
-  http.addHeader("X-Robot-Token", robotToken);
-
-  int httpCode = http.GET();
-
-  if (httpCode == 200) {
-    String payload = http.getString();
-    Serial.print("[RESPONSE] ");
-    Serial.println(payload);
-
-    // Parse JSON response
-    StaticJsonDocument<200> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-
-    if (!error) {
-      robotState.command = (const char*)doc["command"];
-      robotState.speed = doc["speed"];
-      robotState.led = doc["led"];
-      robotState.lastUpdate = millis();
-
-      Serial.print("[STATE] Command: ");
-      Serial.print(robotState.command);
-      Serial.print(" | Speed: ");
-      Serial.print(robotState.speed);
-      Serial.print(" | LED: ");
-      Serial.println(robotState.led);
-    } else {
-      Serial.print("[ERROR] JSON parsing failed: ");
-      Serial.println(error.c_str());
-    }
-  } else {
-    Serial.print("[ERROR] HTTP Code: ");
-    Serial.println(httpCode);
-  }
-
-  http.end();
-}
-
-// ==================== MOTOR CONTROL ====================
-
-void executeCommand() {
-  // Update LED
-  digitalWrite(PIN_LED, robotState.led ? HIGH : LOW);
-
-  // Set PWM speed
-  ledcWrite(PWM_CHANNEL, robotState.speed);
-
-  // Execute movement command
-  if (robotState.command == "stop") {
-    stopMotors();
-  } else if (robotState.command == "forward") {
-    moveForward();
-  } else if (robotState.command == "backward") {
-    moveBackward();
-  } else if (robotState.command == "left") {
-    turnLeft();
-  } else if (robotState.command == "right") {
-    turnRight();
-  }
+void writePwm(int value) {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcWrite(PIN_PWM, value);
+#else
+  ledcWrite(PWM_CHANNEL, value);
+#endif
 }
 
 void stopMotors() {
-  digitalWrite(PIN_MOTOR_A, LOW);
-  digitalWrite(PIN_MOTOR_B, LOW);
-  digitalWrite(PIN_MOTOR_C, LOW);
-  digitalWrite(PIN_MOTOR_D, LOW);
+  digitalWrite(PIN_MOTOR_A, LOW); digitalWrite(PIN_MOTOR_B, LOW);
+  digitalWrite(PIN_MOTOR_C, LOW); digitalWrite(PIN_MOTOR_D, LOW);
+  writePwm(0);
+  throttle = 0; steering = 0;
 }
 
-void moveForward() {
-  digitalWrite(PIN_MOTOR_A, HIGH);
-  digitalWrite(PIN_MOTOR_B, LOW);
-  digitalWrite(PIN_MOTOR_C, HIGH);
-  digitalWrite(PIN_MOTOR_D, LOW);
+void setMotorDirection(int pinA, int pinB, int value) {
+  if (value > 0) { digitalWrite(pinA, HIGH); digitalWrite(pinB, LOW); }
+  else if (value < 0) { digitalWrite(pinA, LOW); digitalWrite(pinB, HIGH); }
+  else { digitalWrite(pinA, LOW); digitalWrite(pinB, LOW); }
 }
 
-void moveBackward() {
-  digitalWrite(PIN_MOTOR_A, LOW);
-  digitalWrite(PIN_MOTOR_B, HIGH);
-  digitalWrite(PIN_MOTOR_C, LOW);
-  digitalWrite(PIN_MOTOR_D, HIGH);
+void applyDrive() {
+  const int left = constrain(throttle + steering, -100, 100);
+  const int right = constrain(throttle - steering, -100, 100);
+  setMotorDirection(PIN_MOTOR_A, PIN_MOTOR_B, left);
+  setMotorDirection(PIN_MOTOR_C, PIN_MOTOR_D, right);
+  writePwm(map(max(abs(left), abs(right)), 0, 100, 0, maxSpeed));
 }
 
-void turnLeft() {
-  digitalWrite(PIN_MOTOR_A, HIGH);
-  digitalWrite(PIN_MOTOR_B, LOW);
-  digitalWrite(PIN_MOTOR_C, LOW);
-  digitalWrite(PIN_MOTOR_D, HIGH);
-}
-
-void turnRight() {
-  digitalWrite(PIN_MOTOR_A, LOW);
-  digitalWrite(PIN_MOTOR_B, HIGH);
-  digitalWrite(PIN_MOTOR_C, HIGH);
-  digitalWrite(PIN_MOTOR_D, LOW);
-}
-
-// ==================== MONITORING ====================
-
-void monitorStatus() {
-  // Check if still receiving commands
-  unsigned long timeSinceLastUpdate = millis() - robotState.lastUpdate;
-
-  if (timeSinceLastUpdate > 2000) {
-    Serial.println("[WARNING] No commands received for 2+ seconds. Stopping motors.");
-    stopMotors();
+void handleCommand(const String &line) {
+  if (line == "S") { stopMotors(); lastCommandAt = millis(); return; }
+  if (line.startsWith("L:")) {
+    ledOn = line.substring(2).toInt() != 0;
+    digitalWrite(PIN_LED, ledOn ? HIGH : LOW);
+    return;
+  }
+  if (line.startsWith("D:")) {
+    const int first = line.indexOf(':', 2);
+    const int second = line.indexOf(':', first + 1);
+    if (first < 0 || second < 0) return;
+    throttle = constrain(line.substring(2, first).toInt(), -100, 100);
+    steering = constrain(line.substring(first + 1, second).toInt(), -100, 100);
+    maxSpeed = constrain(line.substring(second + 1).toInt(), 0, 255);
+    applyDrive();
+    lastCommandAt = millis();
   }
 }
 
-/**
- * Expected JSON Response from Server:
- * {
- *   "command": "forward",
- *   "speed": 128,
- *   "led": false,
- *   "timestamp": 1234567890
- * }
- *
- * Commands:
- * - "stop"     : Stop all motors
- * - "forward"  : Move forward
- * - "backward" : Move backward
- * - "left"     : Turn left
- * - "right"    : Turn right
- *
- * Speed: 0-255 (PWM duty cycle)
- * LED: true/false (Digital GPIO)
- */
+void readBluetooth() {
+  while (SerialBT.available()) {
+    const char c = static_cast<char>(SerialBT.read());
+    if (c == '\n' || c == '\r') {
+      if (inputLine.length()) { handleCommand(inputLine); inputLine = ""; }
+    } else if (inputLine.length() < 48) inputLine += c;
+    else inputLine = "";
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_MOTOR_A, OUTPUT); pinMode(PIN_MOTOR_B, OUTPUT);
+  pinMode(PIN_MOTOR_C, OUTPUT); pinMode(PIN_MOTOR_D, OUTPUT);
+  pinMode(PIN_LED, OUTPUT);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcAttach(PIN_PWM, PWM_FREQUENCY, PWM_RESOLUTION);
+#else
+  ledcSetup(PWM_CHANNEL, PWM_FREQUENCY, PWM_RESOLUTION);
+  ledcAttachPin(PIN_PWM, PWM_CHANNEL);
+#endif
+  stopMotors(); digitalWrite(PIN_LED, LOW);
+  SerialBT.begin("RoboCar-ESP32");
+  lastCommandAt = millis();
+  Serial.println("RoboCar Bluetooth listo: RoboCar-ESP32");
+}
+
+void loop() {
+  readBluetooth();
+  if (millis() - lastCommandAt > COMMAND_TIMEOUT_MS) stopMotors();
+  delay(2);
+}

@@ -1,8 +1,0 @@
-backend/node_modules
-backend/npm-debug.log
-backend/.env
-.git
-.gitignore
-cloudflared
-*.log
-Dockerfile.*

@@ -1,8 +1,0 @@
-tunnel: YOUR_TUNNEL_ID
-credentials-file: /home/USER/.cloudflared/YOUR_TUNNEL_ID.json
-
-ingress:
-  - hostname: robocar.example.com
-    service: http://localhost:3100
-
-  - service: http_status:404
