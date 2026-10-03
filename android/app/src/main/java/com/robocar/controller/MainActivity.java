@@ -14,123 +14,262 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Paint;
-import android.graphics.RectF;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
-import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.Spinner;
-import android.widget.ArrayAdapter;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_BT = 20;
+    private static final int BG = Color.rgb(9, 15, 22);
+    private static final int PANEL = Color.rgb(19, 29, 40);
+    private static final int PANEL_ALT = Color.rgb(25, 38, 51);
+    private static final int TEXT = Color.rgb(242, 247, 249);
+    private static final int MUTED = Color.rgb(166, 184, 193);
+    private static final int ACCENT = Color.rgb(82, 215, 178);
+    private static final int WARN = Color.rgb(255, 184, 92);
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-    private BluetoothAdapter adapter;
+
+    private final Handler main = new Handler(Looper.getMainLooper());
     private final ArrayList<BluetoothDevice> devices = new ArrayList<>();
-    private Spinner deviceSpinner;
-    private TextView status;
-    private Button connectButton, ledButton;
+    private BluetoothAdapter adapter;
+    private LinearLayout deviceList;
+    private TextView status, selectedLabel, scanButton, connectButton, ledButton;
+    private BluetoothDevice selectedDevice;
     private Connection connection;
     private JoystickView driveStick, steerStick;
-    private volatile boolean ledOn;
+    private boolean scanning;
+    private boolean ledOn;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.rgb(11, 17, 24));
+        getWindow().setStatusBarColor(BG);
+        getWindow().setNavigationBarColor(BG);
         adapter = BluetoothAdapter.getDefaultAdapter();
         buildUi();
-        IntentFilter bluetoothEvents = new IntentFilter();
-        bluetoothEvents.addAction(BluetoothDevice.ACTION_FOUND);
-        bluetoothEvents.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, bluetoothEvents, Context.RECEIVER_NOT_EXPORTED);
-        else registerReceiver(receiver, bluetoothEvents);
+        IntentFilter events = new IntentFilter();
+        events.addAction(BluetoothDevice.ACTION_FOUND);
+        events.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, events, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(receiver, events);
         requestBluetoothPermissions();
     }
 
+    private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(28, 18, 28, 18); root.setBackgroundColor(Color.rgb(11,17,24));
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
+        root.setPadding(dp(24), dp(14), dp(24), dp(14));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int left, top, right, bottom;
             if (Build.VERSION.SDK_INT >= 30) {
-                Insets system = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                left = system.left; top = system.top; right = system.right; bottom = system.bottom;
+                Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                left = safe.left; top = safe.top; right = safe.right; bottom = safe.bottom;
             } else {
                 left = insets.getSystemWindowInsetLeft(); top = insets.getSystemWindowInsetTop();
                 right = insets.getSystemWindowInsetRight(); bottom = insets.getSystemWindowInsetBottom();
             }
-            view.setPadding(28 + left, 18 + top, 28 + right, 18 + bottom);
+            view.setPadding(dp(24) + left, dp(14) + top, dp(24) + right, dp(14) + bottom);
             return insets;
         });
-        LinearLayout top = new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = label("ROBOCAR", 20, Color.WHITE); top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        status = label("Desconectado", 14, Color.rgb(255, 180, 90)); top.addView(status);
-        root.addView(top, new LinearLayout.LayoutParams(-1, 54));
-        TextView bluetoothTitle = label("CONEXIÓN BLUETOOTH", 12, Color.rgb(87,214,181));
-        root.addView(bluetoothTitle, new LinearLayout.LayoutParams(-1, 28));
-        LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
-        deviceSpinner = new Spinner(this); tools.addView(deviceSpinner, new LinearLayout.LayoutParams(0, 52, 1));
-        Button scan = button("ESCANEAR"); scan.setOnClickListener(v -> scan()); tools.addView(scan, new LinearLayout.LayoutParams(125, 52));
-        connectButton = button("CONECTAR"); connectButton.setOnClickListener(v -> toggleConnection()); tools.addView(connectButton, new LinearLayout.LayoutParams(125, 52));
-        ledButton = button("LED OFF"); ledButton.setOnClickListener(v -> toggleLed()); tools.addView(ledButton, new LinearLayout.LayoutParams(105, 52));
-        root.addView(tools);
-        LinearLayout sticks = new LinearLayout(this); sticks.setGravity(Gravity.CENTER); sticks.setWeightSum(2);
-        driveStick = new JoystickView(this, "AVANCE"); steerStick = new JoystickView(this, "GIRO");
-        sticks.addView(driveStick, new LinearLayout.LayoutParams(0, -1, 1)); sticks.addView(steerStick, new LinearLayout.LayoutParams(0, -1, 1));
+
+        LinearLayout header = row(Gravity.CENTER_VERTICAL);
+        TextView title = text("ROBOCAR", 24, TEXT); title.setTypeface(null, android.graphics.Typeface.BOLD);
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        status = text("Bluetooth desconectado", 15, WARN);
+        header.addView(status, new LinearLayout.LayoutParams(-2, dp(48)));
+        root.addView(header, new LinearLayout.LayoutParams(-1, dp(52)));
+
+        LinearLayout bluetoothPanel = column();
+        bluetoothPanel.setPadding(dp(16), dp(6), dp(16), dp(6));
+        bluetoothPanel.setBackground(round(PANEL, dp(14)));
+        LinearLayout panelHeader = row(Gravity.CENTER_VERTICAL);
+        TextView section = text("CONEXIÓN BLUETOOTH", 14, ACCENT); section.setTypeface(null, android.graphics.Typeface.BOLD);
+        panelHeader.addView(section, new LinearLayout.LayoutParams(0, dp(34), 1));
+        scanButton = action("BUSCAR DISPOSITIVOS", ACCENT);
+        scanButton.setOnClickListener(v -> scan());
+        panelHeader.addView(scanButton, new LinearLayout.LayoutParams(dp(190), dp(42)));
+        bluetoothPanel.addView(panelHeader);
+
+        selectedLabel = text("Selecciona un dispositivo para conectar", 14, MUTED);
+        selectedLabel.setGravity(Gravity.CENTER_VERTICAL);
+        bluetoothPanel.addView(selectedLabel, new LinearLayout.LayoutParams(-1, dp(24)));
+
+        ScrollView deviceScroll = new ScrollView(this);
+        deviceList = column();
+        deviceScroll.addView(deviceList, new ScrollView.LayoutParams(-1, -2));
+        bluetoothPanel.addView(deviceScroll, new LinearLayout.LayoutParams(-1, dp(54)));
+
+        LinearLayout connectionActions = row(Gravity.CENTER_VERTICAL);
+        connectButton = action("CONECTAR AL AUTO", ACCENT);
+        connectButton.setOnClickListener(v -> toggleConnection());
+        connectionActions.addView(connectButton, new LinearLayout.LayoutParams(dp(190), dp(42)));
+        ledButton = action("LED APAGADO", MUTED);
+        ledButton.setOnClickListener(v -> toggleLed());
+        connectionActions.addView(ledButton, new LinearLayout.LayoutParams(dp(150), dp(42)));
+        TextView hint = text("Bluetooth clásico · SPP", 12, MUTED);
+        hint.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        connectionActions.addView(hint, new LinearLayout.LayoutParams(0, dp(42), 1));
+        bluetoothPanel.addView(connectionActions);
+        root.addView(bluetoothPanel, new LinearLayout.LayoutParams(-1, dp(176)));
+
+        LinearLayout sticks = row(Gravity.CENTER);
+        driveStick = new JoystickView(this, "AVANCE / RETROCESO");
+        steerStick = new JoystickView(this, "GIRO IZQUIERDA / DERECHA");
+        sticks.addView(driveStick, new LinearLayout.LayoutParams(0, -1, 1));
+        sticks.addView(steerStick, new LinearLayout.LayoutParams(0, -1, 1));
         root.addView(sticks, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
         root.requestApplyInsets();
+        refreshDeviceList();
     }
 
-    private TextView label(String text, int size, int color) { TextView v = new TextView(this); v.setText(text); v.setTextSize(size); v.setTextColor(color); v.setGravity(Gravity.CENTER_VERTICAL); return v; }
-    private Button button(String text) { Button b = new Button(this); b.setText(text); b.setTextSize(11); b.setTextColor(Color.WHITE); return b; }
+    private LinearLayout row(int gravity) { LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.HORIZONTAL); v.setGravity(gravity); return v; }
+    private LinearLayout column() { LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); return v; }
+    private TextView text(String value, int size, int color) { TextView v = new TextView(this); v.setText(value); v.setTextSize(size); v.setTextColor(color); v.setGravity(Gravity.CENTER_VERTICAL); v.setMaxLines(2); return v; }
+    private GradientDrawable round(int color, int radius) { GradientDrawable d = new GradientDrawable(); d.setColor(color); d.setCornerRadius(radius); return d; }
+    private TextView action(String value, int color) { TextView v = text(value, 12, TEXT); v.setTypeface(null, android.graphics.Typeface.BOLD); v.setGravity(Gravity.CENTER); v.setPadding(dp(8), 0, dp(8), 0); v.setBackground(round(color == ACCENT ? Color.rgb(35, 116, 99) : Color.rgb(46, 62, 73), dp(10))); return v; }
 
     private void requestBluetoothPermissions() {
         if (Build.VERSION.SDK_INT >= 31) requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BT);
         else if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_BT);
+        else loadPairedDevices();
     }
-    private boolean allowed(String p) { return Build.VERSION.SDK_INT < 23 || checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED; }
-    private void scan() {
-        if (adapter == null) { toast("Este dispositivo no tiene Bluetooth"); return; }
-        if (Build.VERSION.SDK_INT >= 31 && !allowed(Manifest.permission.BLUETOOTH_SCAN)) { requestBluetoothPermissions(); return; }
-        if (!adapter.isEnabled()) { startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)); return; }
-        devices.clear(); updateDevices(); adapter.cancelDiscovery(); adapter.startDiscovery(); status.setText("Escaneando...");
-    }
-    private void updateDevices() { ArrayList<String> names = new ArrayList<>(); for (BluetoothDevice d : devices) names.add(safeName(d) + "\n" + d.getAddress()); if (names.isEmpty()) names.add("Escanea para buscar RoboCar-ESP32"); deviceSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, names)); }
-    private String safeName(BluetoothDevice d) { try { return d.getName() == null ? "Dispositivo Bluetooth" : d.getName(); } catch (SecurityException e) { return "Dispositivo Bluetooth"; } }
-    private void toggleConnection() { if (connection != null) { connection.close(); connection = null; setDisconnected(); return; } int selected = deviceSpinner.getSelectedItemPosition(); if (devices.isEmpty() || selected < 0 || selected >= devices.size()) { toast("Pulsa ESCANEAR y selecciona el auto"); return; } connection = new Connection(devices.get(selected)); connection.start(); status.setText("Conectando..."); }
-    private void toggleLed() { ledOn = !ledOn; ledButton.setText(ledOn ? "LED ON" : "LED OFF"); if (connection != null) connection.send("L:" + (ledOn ? 1 : 0) + "\n"); }
-    private void setConnected() { runOnUiThread(() -> { status.setText("Conectado"); status.setTextColor(Color.rgb(87,214,181)); connectButton.setText("DESCONECTAR"); }); }
-    private void setDisconnected() { runOnUiThread(() -> { status.setText("Desconectado"); status.setTextColor(Color.rgb(255,180,90)); connectButton.setText("CONECTAR"); driveStick.reset(); steerStick.reset(); }); }
-    private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
 
-    private final BroadcastReceiver receiver = new BroadcastReceiver() { @Override public void onReceive(Context c, Intent i) { if (BluetoothDevice.ACTION_FOUND.equals(i.getAction())) { BluetoothDevice d = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE); if (d != null && !devices.contains(d)) { devices.add(d); updateDevices(); } } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(i.getAction())) status.setText("Selecciona el auto"); } };
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == REQUEST_BT) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) loadPairedDevices();
+            else setStatus("Permiso Bluetooth requerido", WARN);
+        }
+    }
+
+    private boolean allowed(String permission) { return Build.VERSION.SDK_INT < 23 || checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED; }
+    private boolean canConnect() { return Build.VERSION.SDK_INT < 31 || allowed(Manifest.permission.BLUETOOTH_CONNECT); }
+
+    private void loadPairedDevices() {
+        if (adapter == null || !canConnect()) return;
+        try {
+            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+            for (BluetoothDevice device : bonded) addDevice(device);
+            refreshDeviceList();
+            if (!devices.isEmpty()) setStatus(devices.size() + " dispositivo(s) disponible(s)", ACCENT);
+            else setStatus("Pulsa BUSCAR DISPOSITIVOS", MUTED);
+        } catch (SecurityException e) { setStatus("Permiso Bluetooth requerido", WARN); }
+    }
+
+    private void scan() {
+        if (adapter == null) { toast("Este teléfono no tiene Bluetooth"); return; }
+        if (Build.VERSION.SDK_INT >= 31 && !allowed(Manifest.permission.BLUETOOTH_SCAN)) { requestBluetoothPermissions(); return; }
+        if (Build.VERSION.SDK_INT < 31 && !allowed(Manifest.permission.ACCESS_FINE_LOCATION)) { requestBluetoothPermissions(); return; }
+        if (!adapter.isEnabled()) { startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)); return; }
+        if (scanning) { stopScan(); return; }
+        loadPairedDevices();
+        scanning = true;
+        scanButton.setText("DETENER BÚSQUEDA");
+        setStatus("Buscando dispositivos...", WARN);
+        try { adapter.cancelDiscovery(); adapter.startDiscovery(); } catch (SecurityException e) { stopScan(); setStatus("No se pudo iniciar la búsqueda", WARN); return; }
+        main.postDelayed(() -> { if (scanning) stopScan(); }, 12000);
+    }
+
+    private void stopScan() {
+        try { if (adapter != null && adapter.isDiscovering()) adapter.cancelDiscovery(); } catch (SecurityException ignored) { }
+        scanning = false;
+        scanButton.setText("BUSCAR DISPOSITIVOS");
+        main.removeCallbacksAndMessages(null);
+        refreshDeviceList();
+        setStatus(devices.isEmpty() ? "No se encontraron dispositivos" : devices.size() + " dispositivo(s) disponible(s)", devices.isEmpty() ? WARN : ACCENT);
+    }
+
+    private void addDevice(BluetoothDevice device) {
+        if (device == null || devices.contains(device)) return;
+        devices.add(device);
+        if (selectedDevice == null && "RoboCar-ESP32".equalsIgnoreCase(safeName(device))) {
+            selectedDevice = device;
+            if (selectedLabel != null) selectedLabel.setText("Seleccionado: " + safeName(device));
+        }
+    }
+    private String safeName(BluetoothDevice device) { try { return device.getName() == null ? "Dispositivo sin nombre" : device.getName(); } catch (SecurityException e) { return "Dispositivo Bluetooth"; } }
+    private String safeAddress(BluetoothDevice device) { try { return device.getAddress(); } catch (SecurityException e) { return "Dirección no disponible"; } }
+
+    private void refreshDeviceList() {
+        if (deviceList == null) return;
+        deviceList.removeAllViews();
+        Collections.sort(devices, (left, right) -> {
+            boolean leftIsCar = "RoboCar-ESP32".equalsIgnoreCase(safeName(left));
+            boolean rightIsCar = "RoboCar-ESP32".equalsIgnoreCase(safeName(right));
+            if (leftIsCar != rightIsCar) return leftIsCar ? -1 : 1;
+            return safeName(left).compareToIgnoreCase(safeName(right));
+        });
+        if (devices.isEmpty()) {
+            TextView empty = text("Ningún dispositivo todavía. Si el ESP32 ya está vinculado, pulsa BUSCAR o revisa Bluetooth del teléfono.", 13, MUTED);
+            empty.setPadding(dp(12), 0, dp(12), 0); deviceList.addView(empty, new LinearLayout.LayoutParams(-1, dp(58))); return;
+        }
+        for (BluetoothDevice device : devices) {
+            TextView item = text(safeName(device) + "  ·  " + safeAddress(device), 13, TEXT);
+            item.setSingleLine(true); item.setEllipsize(android.text.TextUtils.TruncateAt.END); item.setPadding(dp(12), 0, dp(12), 0);
+            item.setBackground(round(device.equals(selectedDevice) ? Color.rgb(31, 83, 76) : PANEL_ALT, dp(8)));
+            item.setOnClickListener(v -> { selectedDevice = device; selectedLabel.setText("Seleccionado: " + safeName(device)); refreshDeviceList(); });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48)); params.setMargins(0, 0, 0, dp(4)); deviceList.addView(item, params);
+        }
+    }
+
+    private void toggleConnection() {
+        if (connection != null) { connection.close(); return; }
+        if (selectedDevice == null) { toast("Selecciona primero RoboCar-ESP32 en la lista"); return; }
+        connection = new Connection(selectedDevice); connectButton.setText("CONECTANDO..."); setStatus("Conectando a " + safeName(selectedDevice), WARN); connection.start();
+    }
+
+    private void toggleLed() { ledOn = !ledOn; ledButton.setText(ledOn ? "LED ENCENDIDO" : "LED APAGADO"); if (connection != null) connection.send("L:" + (ledOn ? 1 : 0) + "\n"); }
+    private void setStatus(String value, int color) { runOnUiThread(() -> { status.setText(value); status.setTextColor(color); }); }
+    private void setConnected() { runOnUiThread(() -> { setStatus("Conectado a RoboCar", ACCENT); connectButton.setText("DESCONECTAR"); }); }
+    private void setDisconnected() { runOnUiThread(() -> { setStatus("Bluetooth desconectado", WARN); connectButton.setText("CONECTAR AL AUTO"); driveStick.reset(); steerStick.reset(); }); }
+    private void toast(String value) { runOnUiThread(() -> Toast.makeText(this, value, Toast.LENGTH_SHORT).show()); }
+
+    private final BroadcastReceiver receiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (BluetoothDevice.ACTION_FOUND.equals(intent.getAction())) {
+                BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (device != null) { addDevice(device); refreshDeviceList(); setStatus(devices.size() + " dispositivo(s) encontrado(s)", ACCENT); }
+            } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(intent.getAction()) && scanning) stopScan();
+        }
+    };
 
     private class Connection extends Thread {
         private final BluetoothDevice device; private BluetoothSocket socket; private OutputStream out;
-        Connection(BluetoothDevice d) { device = d; }
-        public void run() { try { if (adapter.isDiscovering()) adapter.cancelDiscovery(); socket = device.createRfcommSocketToServiceRecord(SPP_UUID); socket.connect(); out = socket.getOutputStream(); setConnected(); } catch (Exception e) { close(); runOnUiThread(() -> toast("No se pudo conectar")); } }
-        synchronized void send(String command) { if (out == null) return; try { out.write(command.getBytes()); out.flush(); } catch (IOException e) { close(); } }
-        synchronized void close() { try { if (socket != null) socket.close(); } catch (IOException ignored) {} out = null; if (connection == this) { connection = null; setDisconnected(); } }
+        Connection(BluetoothDevice value) { device = value; }
+        public void run() { try { if (adapter.isDiscovering()) adapter.cancelDiscovery(); socket = device.createRfcommSocketToServiceRecord(SPP_UUID); socket.connect(); out = socket.getOutputStream(); setConnected(); } catch (Exception e) { close(); toast("No se pudo conectar. Comprueba que RoboCar-ESP32 esté encendido y vinculado."); } }
+        synchronized void send(String command) { if (out == null) return; try { out.write(command.getBytes("UTF-8")); out.flush(); } catch (IOException e) { close(); } }
+        synchronized void close() { try { if (socket != null) socket.close(); } catch (IOException ignored) { } out = null; if (connection == this) { connection = null; setDisconnected(); } }
     }
 
     private class JoystickView extends View {
-        private final Paint paint = new Paint(1); private final String caption; private float x, y; private boolean active;
-        JoystickView(Context c, String label) { super(c); caption = label; setFocusable(true); }
-        protected void onDraw(Canvas c) { super.onDraw(c); float cx = getWidth()/2f, cy = getHeight()/2f, radius = Math.min(getWidth(), getHeight())*.29f; paint.setStyle(Paint.Style.FILL); paint.setColor(Color.rgb(24,34,45)); c.drawCircle(cx,cy,radius,paint); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(3); paint.setColor(Color.rgb(48,73,86)); c.drawCircle(cx,cy,radius,paint); float knobX=cx+x*radius*.72f, knobY=cy+y*radius*.72f; paint.setStyle(Paint.Style.FILL); paint.setColor(Color.rgb(87,214,181)); c.drawCircle(knobX,knobY,radius*.29f,paint); paint.setTextSize(15); paint.setTextAlign(Paint.Align.CENTER); paint.setColor(Color.LTGRAY); c.drawText(caption,cx,cy+radius+34,paint); }
-        public boolean onTouchEvent(MotionEvent e) { float cx=getWidth()/2f, cy=getHeight()/2f, r=Math.min(getWidth(),getHeight())*.29f; if(e.getAction()==MotionEvent.ACTION_UP || e.getAction()==MotionEvent.ACTION_CANCEL){ reset(); return true; } float dx=(e.getX()-cx)/r, dy=(e.getY()-cy)/r, len=(float)Math.sqrt(dx*dx+dy*dy); if(len>1){dx/=len;dy/=len;} x=Math.max(-1,Math.min(1,dx)); y=Math.max(-1,Math.min(1,dy)); active=true; invalidate(); sendDrive(); return true; }
-        void reset() { x=0; y=0; active=false; invalidate(); sendDrive(); }
-        private void sendDrive() { if(connection == null) return; int throttleValue = Math.round(-driveStick.y*100); int steeringValue = Math.round(steerStick.x*100); connection.send("D:"+throttleValue+":"+steeringValue+":200\n"); }
+        private final Paint paint = new Paint(1); private final String caption; private float x, y;
+        JoystickView(Context context, String label) { super(context); caption = label; setFocusable(true); }
+        protected void onDraw(Canvas canvas) { float cx = getWidth()/2f, cy = getHeight()/2f, radius = Math.min(getWidth(), getHeight())*.38f; paint.setStyle(Paint.Style.FILL); paint.setColor(Color.rgb(24,37,49)); canvas.drawCircle(cx, cy, radius, paint); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(dp(2)); paint.setColor(Color.rgb(47,76,88)); canvas.drawCircle(cx, cy, radius, paint); paint.setStyle(Paint.Style.FILL); paint.setColor(ACCENT); canvas.drawCircle(cx+x*radius*.72f, cy+y*radius*.72f, radius*.27f, paint); paint.setTextSize(dp(13)); paint.setTextAlign(Paint.Align.CENTER); paint.setColor(MUTED); canvas.drawText(caption, cx, cy+radius+dp(28), paint); }
+        public boolean onTouchEvent(MotionEvent event) { float cx=getWidth()/2f, cy=getHeight()/2f, radius=Math.min(getWidth(),getHeight())*.38f; if(event.getAction()==MotionEvent.ACTION_UP || event.getAction()==MotionEvent.ACTION_CANCEL) { reset(); return true; } float dx=(event.getX()-cx)/radius, dy=(event.getY()-cy)/radius, length=(float)Math.sqrt(dx*dx+dy*dy); if(length>1) { dx/=length; dy/=length; } x=Math.max(-1,Math.min(1,dx)); y=Math.max(-1,Math.min(1,dy)); invalidate(); sendDrive(); return true; }
+        void reset() { x=0; y=0; invalidate(); sendDrive(); }
+        private void sendDrive() { if(connection == null) return; int throttle=Math.round(-driveStick.y*100), steering=Math.round(steerStick.x*100); connection.send("D:"+throttle+":"+steering+":200\n"); }
     }
 
-    @Override protected void onDestroy() { if (connection != null) connection.close(); unregisterReceiver(receiver); super.onDestroy(); }
+    @Override protected void onDestroy() { main.removeCallbacksAndMessages(null); if (connection != null) connection.close(); unregisterReceiver(receiver); super.onDestroy(); }
 }
