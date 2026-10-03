@@ -8,7 +8,17 @@ RoboCar es un sistema local y directo: un ESP32 DevKit recibe comandos por Bluet
 Android 7+  ── Bluetooth SPP ──>  ESP32 DevKit  ──>  driver de motores
 ```
 
-El firmware conserva los pines existentes: motores `12, 13, 14, 15`, LED `23` y PWM `25`.
+El firmware usa exactamente esta asignación física del L298N:
+
+| Señal | GPIO | Responsabilidad |
+|---|---:|---|
+| LED | D13 | LED, exclusivamente |
+| ENA | D12 | PWM/velocidad motor A |
+| IN1 | D14 | Dirección motor A |
+| IN2 | D27 | Dirección motor A |
+| IN3 | D26 | Dirección motor B |
+| IN4 | D25 | Dirección motor B |
+| ENB | D33 | PWM/velocidad motor B |
 
 ## Firmware
 
@@ -24,7 +34,12 @@ Si no llega un comando de conducción durante 500 ms, el ESP32 detiene los motor
 
 ## Aplicación Android
 
-El proyecto está en `android/` y tiene mínimo Android 7 (API 24). La interfaz está bloqueada en horizontal e incluye escaneo Bluetooth, conexión SPP, joystick izquierdo para avance/retroceso, joystick derecho para giro, botón de LED, envío a 20 Hz y parada al soltar o desconectar.
+El proyecto está en `android/` y tiene mínimo Android 7 (API 24). La aplicación está bloqueada en horizontal y separa responsabilidades en dos pantallas:
+
+- **Dispositivos Bluetooth**: lista dispositivos vinculados/encontrados, selecciona `RoboCar-ESP32`, conecta, desconecta y permite repetir la búsqueda.
+- **Control**: dos joysticks grandes; el izquierdo controla solo avance/retroceso, el derecho solo giro, y el botón central controla únicamente el LED D13.
+
+El firmware mezcla ambos ejes para permitir avanzar mientras se gira. Al soltar un joystick vuelve al centro y se envía inmediatamente `D:0:0:200`. La app envía `D:<throttle>:<steering>:<speed>` y el firmware calcula PWM separado para ENA y ENB.
 
 Se necesita Android SDK API 35 y Gradle 8.7 o posterior:
 
@@ -38,8 +53,8 @@ El APK se genera en `android/app/build/outputs/apk/debug/app-debug.apk`. En Andr
 ## Uso
 
 1. Carga el firmware al ESP32 y reinícialo.
-2. Activa Bluetooth en Android y acepta el emparejamiento si se solicita.
-3. Abre la app, pulsa **ESCANEAR**, selecciona `RoboCar-ESP32` y pulsa **CONECTAR**.
-4. Usa los joysticks; al soltarlos, el control vuelve al centro.
+2. Vincula `RoboCar-ESP32` desde los ajustes Bluetooth del teléfono.
+3. Abre la app, pulsa **BUSCAR DISPOSITIVOS**, selecciona el ESP32 y pulsa **CONECTAR AL AUTO**.
+4. En la pantalla de control, usa los joysticks; al soltarlos, el control vuelve al centro.
 
 No se usan credenciales de backend ni servicios externos para controlar el auto.
