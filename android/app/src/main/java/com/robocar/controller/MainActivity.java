@@ -314,7 +314,7 @@ public class MainActivity extends Activity {
             x=Math.max(-1,Math.min(1,dx)); y=Math.max(-1,Math.min(1,dy)); invalidate(); sendDrive(); return true;
         }
         void reset() { x=0; y=0; invalidate(); sendDrive(); }
-        private void sendDrive() { if(connection == null) return; int throttle=Math.round(-driveStick.y*100), steering=Math.round(steerStick.x*100); connection.send("D:"+throttle+":"+steering+":200\n"); }
+        private void sendDrive() { if(connection == null) return; int throttle=Math.round(-driveStick.y*100), steering=Math.round(steerStick.x*100); connection.send("D:"+throttle+":"+steering+":250\n"); }
     }
 
     @Override public void onBackPressed() { if (controlScreen) disconnectToBluetooth(); else super.onBackPressed(); }

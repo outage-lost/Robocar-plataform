@@ -22,18 +22,21 @@ const int PIN_IN3 = 26;  // D26: motor B direction
 const int PIN_IN4 = 25;  // D25: motor B direction
 const int PIN_ENB = 33;  // D33: motor B speed/PWM only
 
-const int PWM_FREQUENCY = 5000;
+// 20 kHz keeps the PWM outside the audible motor whine range.
+const int PWM_FREQUENCY = 20000;
 const int PWM_RESOLUTION = 8;
 const int PWM_CHANNEL_A = 0;
 const int PWM_CHANNEL_B = 1;
 const unsigned long COMMAND_TIMEOUT_MS = 500;
+const int DEFAULT_MAX_SPEED = 250;
+const int MIN_START_PWM = 90;
 
 BluetoothSerial SerialBT;
 String inputLine;
 unsigned long lastCommandAt = 0;
 int throttle = 0;
 int steering = 0;
-int maxSpeed = 200;
+int maxSpeed = DEFAULT_MAX_SPEED;
 bool ledOn = false;
 
 void writeMotorPwm(int pin, int channel, int value) {
@@ -64,13 +67,20 @@ void setMotorDirection(int pinForward, int pinBackward, int value) {
   }
 }
 
+int pwmForMotor(int magnitude) {
+  magnitude = constrain(abs(magnitude), 0, 100);
+  if (magnitude == 0 || maxSpeed <= 0) return 0;
+  const int startPwm = min(MIN_START_PWM, maxSpeed);
+  return map(magnitude, 1, 100, startPwm, maxSpeed);
+}
+
 void applyDrive() {
   const int left = constrain(throttle + steering, -100, 100);
   const int right = constrain(throttle - steering, -100, 100);
   setMotorDirection(PIN_IN1, PIN_IN2, left);
   setMotorDirection(PIN_IN3, PIN_IN4, right);
-  writeMotorPwm(PIN_ENA, PWM_CHANNEL_A, map(abs(left), 0, 100, 0, maxSpeed));
-  writeMotorPwm(PIN_ENB, PWM_CHANNEL_B, map(abs(right), 0, 100, 0, maxSpeed));
+  writeMotorPwm(PIN_ENA, PWM_CHANNEL_A, pwmForMotor(left));
+  writeMotorPwm(PIN_ENB, PWM_CHANNEL_B, pwmForMotor(right));
 }
 
 void handleCommand(const String &line) {

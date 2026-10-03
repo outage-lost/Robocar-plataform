@@ -39,7 +39,7 @@ El proyecto está en `android/` y tiene mínimo Android 7 (API 24). La aplicaci�
 - **Dispositivos Bluetooth**: lista dispositivos vinculados/encontrados, selecciona `RoboCar-ESP32`, conecta, desconecta y permite repetir la búsqueda.
 - **Control**: dos joysticks grandes; el izquierdo controla solo avance/retroceso, el derecho solo giro, y el botón central controla únicamente el LED D13.
 
-El firmware mezcla ambos ejes para permitir avanzar mientras se gira. Al soltar un joystick vuelve al centro y se envía inmediatamente `D:0:0:200`. La app envía `D:<throttle>:<steering>:<speed>` y el firmware calcula PWM separado para ENA y ENB.
+El firmware mezcla ambos ejes para permitir avanzar mientras se gira. Al soltar un joystick vuelve al centro y se envía inmediatamente `D:0:0:250`. La app usa PWM máximo por defecto `250`; el firmware aplica un PWM mínimo de arranque para evitar que los motores solo zumben con valores bajos y calcula PWM separado para ENA y ENB.
 
 Se necesita Android SDK API 35 y Gradle 8.7 o posterior:
 
